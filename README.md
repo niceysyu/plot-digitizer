@@ -8,6 +8,7 @@
 ## Features
 
 - Axis calibration: 4점 (X1, X2, Y1, Y2), **linear / log scale** 각 축 독립 설정, 약간 회전된 스캔 이미지 대응
+- **X grid (등간격)**: Start·End와 **Step 또는 개수 N** 지정 (한쪽 입력 시 다른 쪽 자동 계산, log X축은 Δlog₁₀ 간격) → 세로 그리드 표시, 클릭한 점의 x를 가장 가까운 그리드에 **스냅**, 색상 자동 추출도 그리드 x 위치에서 수행
 - Manual digitizing: 클릭 추가 · 드래그 이동 · 우클릭 삭제 · 확대경(magnifier) · undo
 - **Color-based auto extraction**: 곡선 색상 선택 → tolerance / X step 지정 → 자동 추출
 - Multiple datasets (series 이름·색상)
@@ -18,6 +19,7 @@
 
 1. 이미지 열기 (Ctrl+O) 또는 붙여넣기 (Ctrl+V)
 2. **① Axis 보정**: X축 위 값을 아는 두 점, Y축 위 두 점을 클릭 → 값 입력 (log 축은 체크)
+   - 등간격 데이터가 필요하면 **X grid**에 Start/End + Step(또는 N) 입력
 3. **② 점 추가** 또는 **③ Color pick** → `현재 시리즈에 추출`
 4. 클립보드 복사 / CSV 저장
 

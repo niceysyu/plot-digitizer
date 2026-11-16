@@ -22,7 +22,7 @@ except Exception:  # pragma: no cover
     ImageGrab = None
 
 APP = "Plot Digitizer"
-VERSION = "1.0"
+VERSION = "1.1"
 COLORS = ["#e11d48", "#2563eb", "#16a34a", "#d97706", "#7c3aed", "#0891b2", "#db2777", "#4b5563"]
 LAB = ["X1", "X2", "Y1", "Y2"]
 CAL_COL = ["#0f766e", "#0f766e", "#9333ea", "#9333ea"]
@@ -133,6 +133,11 @@ class Digitizer:
         self.scope = tk.StringVar(value="현재 시리즈")
         self.delim = tk.StringVar(value="Comma (CSV)")
         self.act_var = tk.IntVar(value=0)
+        self.gvars = {k: tk.StringVar() for k in ("start", "end", "step", "n")}
+        self.gshow = tk.BooleanVar(value=True)
+        self.gsnap = tk.BooleanVar(value=True)
+        self.gauto = tk.BooleanVar(value=True)
+        self._gsync = False
 
         self._new_ds()
         self._build_ui()
@@ -238,12 +243,40 @@ class Digitizer:
         cg.columnconfigure(1, weight=1)
         r = ttk.Frame(side)
         r.pack(fill="x", pady=(4, 0))
-        ttk.Checkbutton(r, text="X log scale", variable=self.logx, command=self.refresh).pack(side="left")
-        ttk.Checkbutton(r, text="Y log scale", variable=self.logy, command=self.refresh).pack(side="left", padx=10)
+        ttk.Checkbutton(r, text="X log scale", variable=self.logx, command=self._on_log).pack(side="left")
+        ttk.Checkbutton(r, text="Y log scale", variable=self.logy, command=self._on_log).pack(side="left", padx=10)
         self.cal_msg = ttk.Label(side, text="", style="Wait.TLabel", wraplength=320)
         self.cal_msg.pack(anchor="w")
         for v in self.cal_vars.values():
             v.trace_add("write", lambda *a: self.refresh())
+
+        # X grid
+        gh = ttk.Frame(side)
+        gh.pack(fill="x", pady=(10, 4))
+        ttk.Label(gh, text="X GRID (등간격)", style="Head.TLabel").pack(side="left")
+        ttk.Button(gh, text="X1–X2로 채우기", command=self.grid_fill).pack(side="right")
+        gf = ttk.Frame(side)
+        gf.pack(fill="x")
+        ttk.Label(gf, text="Start").grid(row=0, column=0, sticky="w")
+        ttk.Entry(gf, textvariable=self.gvars["start"], width=11).grid(row=0, column=1, sticky="ew", padx=(2, 8), pady=1)
+        ttk.Label(gf, text="End").grid(row=0, column=2, sticky="w")
+        ttk.Entry(gf, textvariable=self.gvars["end"], width=11).grid(row=0, column=3, sticky="ew", padx=2, pady=1)
+        self.gstep_lbl = ttk.Label(gf, text="Step")
+        self.gstep_lbl.grid(row=1, column=0, sticky="w")
+        ttk.Entry(gf, textvariable=self.gvars["step"], width=11).grid(row=1, column=1, sticky="ew", padx=(2, 8), pady=1)
+        ttk.Label(gf, text="개수 N").grid(row=1, column=2, sticky="w")
+        ttk.Entry(gf, textvariable=self.gvars["n"], width=11).grid(row=1, column=3, sticky="ew", padx=2, pady=1)
+        gf.columnconfigure(1, weight=1)
+        gf.columnconfigure(3, weight=1)
+        gr = ttk.Frame(side)
+        gr.pack(fill="x", pady=(4, 0))
+        ttk.Checkbutton(gr, text="그리드 표시", variable=self.gshow, command=self.refresh).pack(side="left")
+        ttk.Checkbutton(gr, text="클릭 시 x 스냅", variable=self.gsnap, command=self.refresh).pack(side="left", padx=10)
+        self.ginfo = ttk.Label(side, text="", style="Hint.TLabel", wraplength=320)
+        self.ginfo.pack(anchor="w")
+        for k in ("start", "end", "step"):
+            self.gvars[k].trace_add("write", lambda *a: self._grid_edit("step"))
+        self.gvars["n"].trace_add("write", lambda *a: self._grid_edit("n"))
 
         head("MAGNIFIER")
         self.lp = tk.Canvas(side, width=320, height=130, bg="#fafafa", highlightthickness=1,
@@ -274,6 +307,7 @@ class Digitizer:
         ttk.Label(af, text="X step (px)").grid(row=1, column=0, sticky="w")
         ttk.Spinbox(af, from_=1, to=200, textvariable=self.step, width=7).grid(row=1, column=1, padx=4)
         ttk.Checkbutton(side, text="보정점 범위(X1–X2, Y1–Y2) 안에서만 탐색", variable=self.clip).pack(anchor="w")
+        ttk.Checkbutton(side, text="X grid가 있으면 그리드 x 위치에서 추출 (X step 무시)", variable=self.gauto).pack(anchor="w")
         xf = ttk.Frame(side)
         xf.pack(fill="x", pady=4)
         ttk.Button(xf, text="현재 시리즈에 추출", command=self.auto_extract).pack(side="left")
@@ -473,6 +507,121 @@ class Digitizer:
             return "Log scale 축의 값은 양수여야 합니다."
         return ""
 
+    # -------------------------------------------------------------- X grid
+    def _gnum(self, k):
+        try:
+            return float(self.gvars[k].get().strip())
+        except ValueError:
+            return float("nan")
+
+    def _on_log(self):
+        self._grid_edit("step")
+
+    def _grid_span(self):
+        s, e = self._gnum("start"), self._gnum("end")
+        lx = self.logx.get()
+        if not (math.isfinite(s) and math.isfinite(e)) or s == e or (lx and (s <= 0 or e <= 0)):
+            return None
+        return abs(math.log10(e) - math.log10(s)) if lx else abs(e - s)
+
+    def _grid_edit(self, src):
+        """Step ↔ N 연동 (한쪽을 입력하면 다른 쪽 자동 계산)."""
+        if self._gsync:
+            return
+        self._gsync = True
+        try:
+            span = self._grid_span()
+            if src == "n":
+                try:
+                    n = int(round(float(self.gvars["n"].get())))
+                except ValueError:
+                    n = 0
+                if span and n >= 2:
+                    self.gvars["step"].set(f"{span / (n - 1):.10g}")
+            else:
+                st = self._gnum("step")
+                if span and math.isfinite(st) and st > 0:
+                    self.gvars["n"].set(str(int(math.floor(span / st + 1e-9)) + 1))
+                elif self.gvars["n"].get():
+                    self.gvars["n"].set("")
+        finally:
+            self._gsync = False
+        self.refresh(rebuild_ds=False)
+
+    def grid_fill(self):
+        self._gsync = True
+        self.gvars["start"].set(self.cal_vars["x1"].get())
+        self.gvars["end"].set(self.cal_vars["x2"].get())
+        self._gsync = False
+        if not math.isfinite(self._gnum("step")):
+            self.gvars["n"].set("11")
+        else:
+            self._grid_edit("step")
+
+    def grid_vals(self):
+        lx = self.logx.get()
+        s, e, st = self._gnum("start"), self._gnum("end"), self._gnum("step")
+        if not all(math.isfinite(v) for v in (s, e, st)) or st <= 0 or s == e:
+            return None
+        if lx:
+            if s <= 0 or e <= 0:
+                return None
+            s, e = math.log10(s), math.log10(e)
+        d = 1 if e > s else -1
+        n = int(math.floor(abs(e - s) / st + 1e-9)) + 1
+        if n < 1 or n > 5000:
+            return None
+        out = []
+        for i in range(n):
+            v = float(f"{s + d * i * st:.12g}")
+            out.append(float(f"{10 ** v:.12g}") if lx else v)
+        return out
+
+    def grid_lines(self, C=None):
+        C = C or self.cal()
+        g = self.grid_vals()
+        if not C or not g:
+            return None
+        dx, dy = C["X2"][0] - C["X1"][0], C["X2"][1] - C["X1"][1]
+        res = []
+        for v in g:
+            tv = math.log10(v) if C["lx"] else v
+            t = (tv - C["a"]) / (C["b"] - C["a"])
+            res.append((v, t, (C["X1"][0] + t * dx, C["X1"][1] + t * dy)))
+        return res
+
+    def snap_pt(self, ix, iy, C=None, force=False):
+        if not (force or self.gsnap.get()):
+            return [ix, iy]
+        C = C or self.cal()
+        G = self.grid_lines(C)
+        if not G:
+            return [ix, iy]
+        t = proj((ix, iy), C["X1"], C["X2"])
+        best = min(G, key=lambda g: abs(g[1] - t))
+        dt = best[1] - t
+        return [ix + dt * (C["X2"][0] - C["X1"][0]), iy + dt * (C["X2"][1] - C["X1"][1])]
+
+    def grid_info(self):
+        self.gstep_lbl.config(text="Step (Δlog₁₀)" if self.logx.get() else "Step")
+        g = self.grid_vals()
+        if not g:
+            any_in = any(self.gvars[k].get().strip() for k in ("start", "end", "step"))
+            self.ginfo.config(text="Start/End/Step을 확인하세요." if any_in else
+                              "Start·End와 Step 또는 개수 N을 입력하면 등간격 세로선이 생깁니다.", style="Hint.TLabel")
+            return
+        C = self.cal()
+        if not C:
+            self.ginfo.config(text=f"{len(g)}개 그리드 — 축 보정을 완료하면 표시됩니다.", style="Hint.TLabel")
+            return
+        G = self.grid_lines(C)
+        axl = math.dist(C["X1"], C["X2"])
+        ts = [proj(p, C["X1"], C["X2"]) for p in self.datasets[self.act]["pts"]]
+        filled = sum(1 for _, t, _ in G if any(abs(t - q) * axl < 0.6 for q in ts))
+        self.ginfo.config(text=f"{len(g)}개 그리드 · 현재 시리즈 입력 {filled}/{len(g)}"
+                               + ("  (log: 0.1 = 10점/decade)" if self.logx.get() else ""),
+                          style="Ok.TLabel" if filled == len(g) else "Hint.TLabel")
+
     # --------------------------------------------------------------- modes
     def set_mode(self, m):
         self.mode.set(m)
@@ -575,6 +724,30 @@ class Digitizer:
             A, B = self.calib[i], self.calib[j]
             if A and B:
                 cv.create_line(*self.i2s(*A), *self.i2s(*B), fill=c, dash=(5, 4), tags="ov")
+        C = self.cal()
+        G = self.grid_lines(C) if self.gshow.get() else None
+        if G:
+            ux, uy = C["Y2"][0] - C["Y1"][0], C["Y2"][1] - C["Y1"][1]
+            L = math.hypot(ux, uy)
+            ux, uy = ux / L, uy / L
+            axl = math.dist(C["X1"], C["X2"])
+            ts = [proj(p, C["X1"], C["X2"]) for p in self.datasets[self.act]["pts"]]
+            near = -1
+            if self.mode.get() == "add" and self.mouse and self.gsnap.get():
+                t0 = proj(self.s2i(*self.mouse), C["X1"], C["X2"])
+                near = min(range(len(G)), key=lambda i: abs(G[i][1] - t0))
+            for i, (v, t, P) in enumerate(G):
+                s1 = (C["Y1"][0] - P[0]) * ux + (C["Y1"][1] - P[1]) * uy
+                s2 = (C["Y2"][0] - P[0]) * ux + (C["Y2"][1] - P[1]) * uy
+                has = any(abs(t - q) * axl < 0.6 for q in ts)
+                a = self.i2s(P[0] + ux * s1, P[1] + uy * s1)
+                b = self.i2s(P[0] + ux * s2, P[1] + uy * s2)
+                if i == near:
+                    cv.create_line(*a, *b, fill="#ea580c", width=2, tags="ov")
+                elif has:
+                    cv.create_line(*a, *b, fill="#86c99a", width=1, tags="ov")
+                else:
+                    cv.create_line(*a, *b, fill="#f5b544", width=1, dash=(4, 3), tags="ov")
         order = [k for k in range(len(self.datasets)) if k != self.act] + [self.act]
         for k in order:
             ds, on = self.datasets[k], k == self.act
@@ -686,7 +859,7 @@ class Digitizer:
         else:
             self.snapshot()
             pts = self.datasets[self.act]["pts"]
-            pts.append([ix, iy])
+            pts.append(self.snap_pt(ix, iy))
             self.hover = ("pt", len(pts) - 1)
             self.drag = self.hover
             self.refresh()
@@ -700,7 +873,7 @@ class Digitizer:
         if self.drag[0] == "cal":
             self.calib[self.drag[1]] = [ix, iy]
         else:
-            self.datasets[self.act]["pts"][self.drag[1]] = [ix, iy]
+            self.datasets[self.act]["pts"][self.drag[1]] = self.snap_pt(ix, iy)
         self.mouse = (e.x, e.y)
         self._readout(ix, iy)
         self.draw_overlay()
@@ -901,7 +1074,11 @@ class Digitizer:
         tol2 = tol * tol
         px = self.px
         out, prev = [], None
-        for x in range(x0, x1 + 1, step):
+        GL = self.grid_lines(C) if self.gauto.get() else None
+        use_g = bool(GL)
+        cols = [P[0] for _, _, P in GL] if use_g else [x + 0.5 for x in range(x0, x1 + 1, step)]
+
+        def scan(x):
             runs, s = [], -1
             for y in range(y0, y1 + 1):
                 r, g, b = px[x, y][:3]
@@ -913,6 +1090,16 @@ class Digitizer:
                     s = -1
             if s >= 0:
                 runs.append((s, y1))
+            return runs
+
+        for cx in cols:
+            runs = []
+            for off in ((0, -1, 1, -2, 2) if use_g else (0,)):
+                x = int(math.floor(cx)) + off
+                if x0 <= x <= x1:
+                    runs = scan(x)
+                    if runs:
+                        break
             if not runs:
                 continue
             if prev is None:
@@ -921,12 +1108,12 @@ class Digitizer:
                 r = min(runs, key=lambda q: abs((q[0] + q[1]) / 2 - prev))
             yc = (r[0] + r[1]) / 2
             prev = yc
-            out.append([x + 0.5, yc + 0.5])
+            out.append(self.snap_pt(cx, yc + 0.5, C, force=True) if use_g else [cx, yc + 0.5])
         if not out:
             return msg.config(text="일치하는 픽셀 없음 — Tolerance↑")
         self.snapshot()
         self.datasets[self.act]["pts"] = out
-        msg.config(text=f"{len(out)}개 점 추출")
+        msg.config(text=f"{len(out)}개 점 추출" + (f" (그리드 {len(GL)}개 중)" if use_g else ""))
         self.refresh()
 
     # ------------------------------------------------------ table / export
@@ -1020,6 +1207,7 @@ class Digitizer:
             "logx": self.logx.get(), "logy": self.logy.get(),
             "datasets": self.datasets, "act": self.act,
             "pick_color": self.pick_color,
+            "grid": {k: v.get() for k, v in self.gvars.items()},
         }
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f)
@@ -1047,6 +1235,11 @@ class Digitizer:
             self._new_ds()
         self.act = min(d.get("act", 0), len(self.datasets) - 1)
         self.pick_color = tuple(d["pick_color"]) if d.get("pick_color") else None
+        self._gsync = True
+        for k, v in (d.get("grid") or {}).items():
+            if k in self.gvars:
+                self.gvars[k].set(v)
+        self._gsync = False
         self.hist = []
         self.set_mode("add")
 
@@ -1073,6 +1266,7 @@ class Digitizer:
             else:
                 s.config(text="미설정", style="TLabel")
         self.cal_msg.config(text=self.cal_message())
+        self.grid_info()
         if self.pick_color:
             self.swatch.config(bg="#%02x%02x%02x" % self.pick_color)
             self.pick_lbl.config(text="RGB(%d, %d, %d)" % self.pick_color)

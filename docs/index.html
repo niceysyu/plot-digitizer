@@ -100,6 +100,20 @@ kbd{font:11px ui-monospace,monospace;border:1px solid var(--line);border-bottom-
       <div class="msg" id="calMsg"></div>
     </section>
     <section>
+      <h2>X grid (등간격) <span class="sp"></span><button class="b sm" id="gFill" title="보정값 X1, X2를 Start/End로">X1–X2로 채우기</button></h2>
+      <div class="ag">
+        <label>Start<input type="text" id="gStart" placeholder="예: 0"></label>
+        <label>End<input type="text" id="gEnd" placeholder="예: 1.5"></label>
+        <label><span id="gStepLab">Step</span><input type="text" id="gStep" placeholder="예: 0.05"></label>
+        <label>점 개수 (N)<input type="number" id="gN" min="2" placeholder="또는 개수"></label>
+      </div>
+      <div class="row" style="margin-top:6px">
+        <label class="ck"><input type="checkbox" id="gShow" checked> 그리드 표시</label>
+        <label class="ck"><input type="checkbox" id="gSnap" checked> 클릭 시 x 스냅</label>
+      </div>
+      <div class="st" id="gInfo" style="margin-top:4px"></div>
+    </section>
+    <section>
       <h2>Magnifier</h2>
       <canvas id="loupe"></canvas>
     </section>
@@ -116,6 +130,7 @@ kbd{font:11px ui-monospace,monospace;border:1px solid var(--line);border-bottom-
         <label>Tolerance (RGB 거리)<input type="number" id="tol" value="60" min="1" max="441"></label>
         <label>X step (px)<input type="number" id="stepPx" value="5" min="1"></label>
         <label style="grid-column:1/3;flex-direction:row;align-items:center;gap:6px;color:var(--ink)"><input type="checkbox" id="clip" checked> 보정점 범위(X1–X2, Y1–Y2) 안에서만 탐색</label>
+        <label style="grid-column:1/3;flex-direction:row;align-items:center;gap:6px;color:var(--ink)"><input type="checkbox" id="gAuto" checked> X grid가 있으면 그리드 x 위치에서 추출 (X step 무시)</label>
       </div>
       <div class="row" style="margin-top:8px"><button class="b p" id="autoBtn">현재 시리즈에 추출</button><span class="msg" id="autoMsg"></span></div>
     </section>
@@ -204,6 +219,49 @@ function fit(){if(!img)return;const r=cv.getBoundingClientRect();const s=Math.mi
   view={s,ox:(r.width-W*s)/2,oy:(r.height-H*s)/2};draw();}
 window.addEventListener('resize',size);
 
+/* ---------- X grid ---------- */
+function gridVals(){
+  const lx=$('logx').checked;let s=num('gStart'),e=num('gEnd'),st=num('gStep');
+  if(![s,e,st].every(isFinite)||st<=0||s===e)return null;
+  if(lx){if(s<=0||e<=0)return null;s=Math.log10(s);e=Math.log10(e);}
+  const dir=e>s?1:-1,n=Math.floor(Math.abs(e-s)/st+1e-9)+1;
+  if(n<1||n>5000)return null;
+  const out=[];for(let i=0;i<n;i++){const v=+(s+dir*i*st).toPrecision(12);out.push(lx?+(10**v).toPrecision(12):v);}
+  return out;
+}
+function gridLines(C=cal()){ // [{v,t,P}] P = crossing point on X axis (image px)
+  const g=gridVals();if(!C||!g)return null;
+  const dx=C.X2[0]-C.X1[0],dy=C.X2[1]-C.X1[1];
+  return g.map(v=>{const tv=C.lx?Math.log10(v):v,t=(tv-C.a)/(C.b-C.a);return {v,t,P:[C.X1[0]+t*dx,C.X1[1]+t*dy]};});
+}
+function snapPt(ix,iy,C=cal()){
+  if(!$('gSnap').checked)return [ix,iy];
+  const G=gridLines(C);if(!G||!G.length)return [ix,iy];
+  const t=proj([ix,iy],C.X1,C.X2);let best=G[0];
+  for(const g of G)if(Math.abs(g.t-t)<Math.abs(best.t-t))best=g;
+  const dt=best.t-t;return [ix+dt*(C.X2[0]-C.X1[0]),iy+dt*(C.X2[1]-C.X1[1])];
+}
+function gridSyncN(){const s=num('gStart'),e=num('gEnd'),st=num('gStep'),lx=$('logx').checked;
+  if(![s,e,st].every(isFinite)||st<=0||s===e||(lx&&(s<=0||e<=0))){$('gN').value='';return;}
+  const span=lx?Math.abs(Math.log10(e)-Math.log10(s)):Math.abs(e-s);$('gN').value=Math.floor(span/st+1e-9)+1;}
+function gridSyncStep(){const s=num('gStart'),e=num('gEnd'),n=Math.round(num('gN')),lx=$('logx').checked;
+  if(![s,e].every(isFinite)||!(n>=2)||s===e||(lx&&(s<=0||e<=0)))return;
+  const span=lx?Math.abs(Math.log10(e)-Math.log10(s)):Math.abs(e-s);$('gStep').value=+(span/(n-1)).toPrecision(10);}
+['gStart','gEnd','gStep'].forEach(id=>$(id).addEventListener('input',()=>{gridSyncN();refresh();}));
+$('gN').addEventListener('input',()=>{gridSyncStep();refresh();});
+['gShow','gSnap'].forEach(id=>$(id).addEventListener('change',refresh));
+$('gFill').onclick=()=>{$('gStart').value=$('v_x1').value;$('gEnd').value=$('v_x2').value;
+  if(!num('gStep')&&!num('gN')){$('gN').value=11;gridSyncStep();}else gridSyncN();refresh();};
+function gridInfo(){
+  const lab=$('gStepLab');lab.textContent=$('logx').checked?'Step (Δlog₁₀, 0.1=10점/decade)':'Step';
+  const g=gridVals(),el=$('gInfo');
+  if(!g){el.textContent=(num('gStart')||num('gEnd')||num('gStep'))?'Start/End/Step을 확인하세요.':'Start·End·Step(또는 N)을 입력하면 등간격 세로선이 생깁니다.';el.className='st';return;}
+  const C=cal();
+  if(!C){el.textContent=g.length+'개 그리드 — 축 보정을 완료하면 표시됩니다.';el.className='st';return;}
+  const G=gridLines(C),filled=G.filter(gl=>datasets[act].pts.some(p=>Math.abs(proj(p,C.X1,C.X2)-gl.t)*Math.hypot(C.X2[0]-C.X1[0],C.X2[1]-C.X1[1])<0.6)).length;
+  el.textContent=`${g.length}개 그리드 · 현재 시리즈 입력 ${filled}/${g.length}`;el.className='st'+(filled===g.length?' ok':'');
+}
+
 function draw(){
   const d=devicePixelRatio||1,r=cv.getBoundingClientRect();
   ctx.setTransform(d,0,0,d,0,0);ctx.clearRect(0,0,r.width,r.height);
@@ -215,6 +273,17 @@ function draw(){
   [[0,1,'#0f766e'],[2,3,'#9333ea']].forEach(([i,j,c])=>{const A=calib.p[i],B=calib.p[j];if(!A||!B)return;
     const a=i2s(...A),b=i2s(...B);ctx.strokeStyle=c;ctx.beginPath();ctx.moveTo(...a);ctx.lineTo(...b);ctx.stroke();});
   ctx.setLineDash([]);
+  const C=cal(),G=$('gShow').checked?gridLines(C):null;
+  if(G){const ux=C.Y2[0]-C.Y1[0],uy=C.Y2[1]-C.Y1[1],L=Math.hypot(ux,uy),u=[ux/L,uy/L],axL=Math.hypot(C.X2[0]-C.X1[0],C.X2[1]-C.X1[1]);
+    let near=-1;if(mode==='add'&&mouse&&$('gSnap').checked){const [mx,my]=s2i(...mouse),t=proj([mx,my],C.X1,C.X2);let bd=1e9;G.forEach((g,i)=>{const dd=Math.abs(g.t-t);if(dd<bd){bd=dd;near=i;}});}
+    const pts=datasets[act].pts.map(p=>proj(p,C.X1,C.X2));
+    G.forEach((g,i)=>{const s1=(C.Y1[0]-g.P[0])*u[0]+(C.Y1[1]-g.P[1])*u[1],s2=(C.Y2[0]-g.P[0])*u[0]+(C.Y2[1]-g.P[1])*u[1];
+      const has=pts.some(t=>Math.abs(t-g.t)*axL<0.6);
+      const a=i2s(g.P[0]+u[0]*s1,g.P[1]+u[1]*s1),b=i2s(g.P[0]+u[0]*s2,g.P[1]+u[1]*s2);
+      ctx.strokeStyle=i===near?'rgba(234,88,12,.95)':has?'rgba(22,163,74,.55)':'rgba(245,158,11,.6)';
+      ctx.lineWidth=i===near?2:1;ctx.setLineDash(has||i===near?[]:[4,3]);
+      ctx.beginPath();ctx.moveTo(...a);ctx.lineTo(...b);ctx.stroke();});
+    ctx.setLineDash([]);}
   // datasets (inactive first)
   const order=datasets.map((_,k)=>k).filter(k=>k!==act).concat([act]);
   order.forEach(k=>{const ds=datasets[k],on=k===act;
@@ -279,16 +348,16 @@ cv.addEventListener('mousedown',e=>{
   if(mode==='calib'){const n=calib.p.findIndex(p=>!p);if(n<0)return;snapshot();calib.p[n]=[ix,iy];
     if(calib.p.every(p=>p)){setMode('add');const f=$('v_x1');f.focus();f.select();}else refresh();return;}
   if(mode==='pick'){pickAt(ix,iy);return;}
-  if(mode==='add'){snapshot();datasets[act].pts.push([ix,iy]);hover={t:'pt',i:datasets[act].pts.length-1};drag={t:'pt',i:hover.i};refresh();}
+  if(mode==='add'){snapshot();datasets[act].pts.push(snapPt(ix,iy));hover={t:'pt',i:datasets[act].pts.length-1};drag={t:'pt',i:hover.i};refresh();}
 });
 window.addEventListener('mousemove',e=>{
   if(!img)return;const [mx,my]=mpos(e),r=cv.getBoundingClientRect();
   const inside=mx>=0&&my>=0&&mx<=r.width&&my<=r.height;
   if(drag&&drag.t==='pan'){view.ox=drag.ox+mx-drag.sx;view.oy=drag.oy+my-drag.sy;draw();return;}
   if(!inside&&!drag)return;
-  mouse=[mx,my];const [ix,iy]=s2i(mx,my);
+  mouse=[mx,my];const [ix,iy]=s2i(mx,my),C0=cal();
   if(drag&&drag.t==='cal'){calib.p[drag.i]=[ix,iy];}
-  else if(drag&&drag.t==='pt'){datasets[act].pts[drag.i]=[ix,iy];}
+  else if(drag&&drag.t==='pt'){datasets[act].pts[drag.i]=snapPt(ix,iy,C0);}
   else hover=hitTest(mx,my);
   if(!spaceDown)cv.style.cursor=hover?'move':(mode==='pick'?'copy':'crosshair');
   const C=cal(),dd=toData(ix,iy,C);
@@ -378,18 +447,23 @@ function autoExtract(){
   const d=pix.data,[R,G,B]=pickColor;
   const match=(x,y)=>{const o=(y*W+x)*4;if(d[o+3]<20)return false;const a=d[o]-R,b=d[o+1]-G,c=d[o+2]-B;return a*a+b*b+c*c<=tol2;};
   const out=[];let prevY=null;
-  for(let x=x0;x<=x1;x+=step){
-    const runs=[];let s=-1;
+  const GL=$('gAuto').checked?gridLines(C):null,useG=!!(GL&&GL.length);
+  const cols=useG?GL.map(g=>g.P[0]):[];if(!useG)for(let x=x0;x<=x1;x+=step)cols.push(x+.5);
+  const scan=x=>{const runs=[];let s=-1;
     for(let y=y0;y<=y1;y++){const mm=match(x,y);if(mm&&s<0)s=y;if(!mm&&s>=0){runs.push([s,y-1]);s=-1;}}
-    if(s>=0)runs.push([s,y1]);
+    if(s>=0)runs.push([s,y1]);return runs;};
+  for(const cx of cols){
+    let runs=[];
+    for(const off of (useG?[0,-1,1,-2,2]:[0])){const x=Math.floor(cx)+off;
+      if(x<x0||x>x1)continue;runs=scan(x);if(runs.length)break;}
     if(!runs.length)continue;
     let r;
     if(prevY===null)r=runs.reduce((a,b)=>(b[1]-b[0])>(a[1]-a[0])?b:a);
     else r=runs.reduce((a,b)=>Math.abs((b[0]+b[1])/2-prevY)<Math.abs((a[0]+a[1])/2-prevY)?b:a);
-    const yc=(r[0]+r[1])/2+.5;prevY=yc-.5;out.push([x+.5,yc]);
+    const yc=(r[0]+r[1])/2+.5;prevY=yc-.5;out.push(useG?snapPt(cx,yc,C):[cx,yc]);
   }
   if(!out.length){m.textContent='일치하는 픽셀이 없습니다 — Tolerance를 늘려보세요.';return;}
-  snapshot();datasets[act].pts=out;m.textContent=out.length+'개 점 추출';refresh();
+  snapshot();datasets[act].pts=out;m.textContent=out.length+'개 점 추출'+(useG?` (그리드 ${GL.length}개 중)`:'');refresh();
 }
 $('autoBtn').onclick=autoExtract;
 
@@ -432,7 +506,7 @@ function renderOut(){
   o.value=lines.join('\n');
 }
 ['scope','delim','sortx'].forEach(id=>$(id).addEventListener('change',()=>{renderTable();renderOut();}));
-['logx','logy'].forEach(id=>$(id).addEventListener('change',refresh));
+['logx','logy'].forEach(id=>$(id).addEventListener('change',()=>{gridSyncN();refresh();}));
 $('copyBtn').onclick=async()=>{const t=$('out').value,m=$('copyMsg');if(!t){m.textContent='복사할 데이터가 없습니다';return;}
   try{await navigator.clipboard.writeText(t);m.textContent='복사됨 ✓';}
   catch(_){const o=$('out');o.focus();o.select();try{document.execCommand('copy');m.textContent='복사됨 ✓';}catch(__){m.textContent='텍스트를 선택했습니다 — Ctrl+C';}}
@@ -453,7 +527,7 @@ function refresh(){
   if(pickColor){$('pickSw').style.background=`rgb(${pickColor})`;$('pickTxt').textContent=`RGB(${pickColor.join(', ')})`;}
   else{$('pickSw').style.background='';$('pickTxt').textContent='색상 미선택 — ③ Color pick 모드에서 곡선 클릭';}
   const h=$('hint');h.textContent=hintText();h.hidden=!img;
-  renderDs();renderTable();renderOut();draw();drawLoupe();
+  gridInfo();renderDs();renderTable();renderOut();draw();drawLoupe();
 }
 $('undoBtn').onclick=undo;$('fitBtn').onclick=fit;
 setMode('calib');size();
