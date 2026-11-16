@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Plot Digitizer</title>
+<link rel="icon" href="icon.png">
+<meta name="description" content="그래프 이미지에서 데이터 포인트를 추출하는 웹 디지타이저 (axis calibration, log scale, color auto-extract)">
+<style>
+:root{--bg:#f6f7f9;--panel:#fff;--line:#e3e6eb;--ink:#1d2330;--mute:#6b7280;--acc:#2563eb}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;font:13px/1.45 system-ui,-apple-system,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic",sans-serif;color:var(--ink);background:var(--bg);display:flex;flex-direction:column}
+header{display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--line);background:var(--panel);flex-wrap:wrap}
+header h1{font-size:14px;margin:0 6px 0 0;font-weight:650}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+.seg button{border:0;border-right:1px solid var(--line);background:#fff;padding:6px 11px;cursor:pointer;font:inherit;color:var(--ink)}
+.seg button:last-child{border-right:0}
+.seg button.on{background:var(--acc);color:#fff}
+button.b{border:1px solid var(--line);background:#fff;border-radius:6px;padding:5px 10px;cursor:pointer;font:inherit;color:var(--ink)}
+button.b:hover{border-color:#b9bfca}
+button.p{background:var(--acc);border-color:var(--acc);color:#fff}
+button.sm{padding:2px 7px;font-size:12px}
+.sp{flex:1}
+main{flex:1;display:flex;min-height:0}
+#stage{flex:1;position:relative;overflow:hidden;background:#eceef2}
+#cv{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:crosshair}
+#drop{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;color:var(--mute);text-align:center;padding:20px}
+#drop b{color:var(--ink);font-size:16px}
+#drop.over{background:rgba(37,99,235,.08);outline:2px dashed var(--acc);outline-offset:-12px}
+#hint{position:absolute;left:10px;bottom:10px;background:rgba(29,35,48,.88);color:#fff;padding:6px 10px;border-radius:6px;font-size:12px;max-width:62%;pointer-events:none}
+#readout{position:absolute;right:10px;bottom:10px;background:rgba(255,255,255,.94);border:1px solid var(--line);padding:5px 9px;border-radius:6px;font:12px ui-monospace,Menlo,Consolas,monospace;pointer-events:none;white-space:pre}
+aside{width:350px;background:var(--panel);border-left:1px solid var(--line);overflow:auto;padding:12px 14px}
+section{border-bottom:1px solid var(--line);padding:11px 0}
+section:first-child{padding-top:0}
+section:last-child{border-bottom:0}
+h2{font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--mute);margin:0 0 8px;font-weight:650;display:flex;align-items:center;gap:6px}
+h2 .sp{flex:1}
+input[type=text],input[type=number],select,textarea{font:inherit;padding:4px 6px;border:1px solid var(--line);border-radius:5px;width:100%;min-width:0;color:var(--ink);background:#fff}
+input:focus,select:focus,textarea:focus{outline:2px solid rgba(37,99,235,.35);border-color:var(--acc)}
+.cg{display:grid;grid-template-columns:28px 1fr 74px 30px;gap:5px 6px;align-items:center}
+.cg .lb{font-weight:650}
+.st{font-size:11.5px;color:var(--mute)}
+.st.ok{color:#15803d}
+.st.wait{color:#b45309;font-weight:600}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+label.ck{display:inline-flex;gap:5px;align-items:center;cursor:pointer}
+#loupe{width:100%;height:140px;border:1px solid var(--line);border-radius:6px;background:#fafafa;display:block;image-rendering:pixelated}
+.ds{display:grid;grid-template-columns:16px 26px 1fr 40px 24px;gap:6px;align-items:center;padding:4px 5px;border-radius:6px;cursor:pointer}
+.ds.on{background:#eef3fe}
+.ds input[type=color]{width:26px;height:22px;padding:0;border:1px solid var(--line);border-radius:4px;background:none}
+.ds .n{font-size:11.5px;color:var(--mute);text-align:right}
+.x{border:0;background:none;color:var(--mute);cursor:pointer;font-size:15px;line-height:1}
+.x:hover{color:#dc2626}
+.tbl{max-height:190px;overflow:auto;border:1px solid var(--line);border-radius:6px}
+table{border-collapse:collapse;width:100%;font:12px ui-monospace,Menlo,Consolas,monospace}
+th,td{padding:3px 8px;text-align:right;border-bottom:1px solid #f0f1f4}
+th{position:sticky;top:0;background:#f8f9fb;color:var(--mute);font-weight:600}
+td:first-child,th:first-child{text-align:left;color:var(--mute)}
+textarea{height:110px;font:12px ui-monospace,Menlo,Consolas,monospace;resize:vertical}
+.sw{width:22px;height:22px;border-radius:5px;border:1px solid var(--line);display:inline-block;vertical-align:middle;background:repeating-conic-gradient(#ddd 0 25%,#fff 0 50%) 0 0/8px 8px}
+.msg{font-size:12px;color:#b45309;min-height:0}
+.ag{display:grid;grid-template-columns:1fr 1fr;gap:6px 10px}
+.ag label{display:flex;flex-direction:column;gap:2px;font-size:11.5px;color:var(--mute)}
+kbd{font:11px ui-monospace,monospace;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 4px;background:#fafafa}
+.help{font-size:12px;color:var(--mute);line-height:1.7}
+</style>
+</head>
+<body>
+<header>
+  <h1>Plot Digitizer</h1>
+  <button class="b p" id="openBtn">이미지 열기</button>
+  <input type="file" id="file" accept="image/*" hidden>
+  <button class="b" id="demoBtn">예제 그래프</button>
+  <div class="seg" id="modes">
+    <button data-m="calib">① Axis 보정</button>
+    <button data-m="add">② 점 추가/편집</button>
+    <button data-m="pick">③ Color pick</button>
+  </div>
+  <span class="sp"></span>
+  <a class="b" href="https://github.com/niceysyu/plot-digitizer/releases/latest" target="_blank" rel="noopener" style="text-decoration:none">⬇ Desktop 버전</a>
+  <button class="b" id="undoBtn" title="Ctrl+Z">되돌리기</button>
+  <button class="b" id="fitBtn" title="F">화면 맞춤</button>
+</header>
+<main>
+  <div id="stage">
+    <canvas id="cv"></canvas>
+    <div id="drop"><b>그래프 이미지를 끌어다 놓거나 붙여넣기(Ctrl+V)</b><span>PNG · JPG · 스크린샷 모두 가능 · 또는 상단 “이미지 열기”</span></div>
+    <div id="hint" hidden></div>
+    <div id="readout" hidden></div>
+  </div>
+  <aside>
+    <section>
+      <h2>Axis calibration</h2>
+      <div class="cg" id="calGrid"></div>
+      <div class="row" style="margin-top:8px">
+        <label class="ck"><input type="checkbox" id="logx"> X log scale</label>
+        <label class="ck"><input type="checkbox" id="logy"> Y log scale</label>
+      </div>
+      <div class="msg" id="calMsg"></div>
+    </section>
+    <section>
+      <h2>Magnifier</h2>
+      <canvas id="loupe"></canvas>
+    </section>
+    <section>
+      <h2>Datasets <span class="sp"></span><button class="b sm" id="addDs">+ 시리즈</button></h2>
+      <div id="dsList"></div>
+    </section>
+    <section>
+      <h2>Auto extract (color)</h2>
+      <div class="row" style="margin-bottom:8px">
+        <span class="sw" id="pickSw"></span><span class="st" id="pickTxt">색상 미선택 — ③ Color pick 모드에서 곡선 클릭</span>
+      </div>
+      <div class="ag">
+        <label>Tolerance (RGB 거리)<input type="number" id="tol" value="60" min="1" max="441"></label>
+        <label>X step (px)<input type="number" id="stepPx" value="5" min="1"></label>
+        <label style="grid-column:1/3;flex-direction:row;align-items:center;gap:6px;color:var(--ink)"><input type="checkbox" id="clip" checked> 보정점 범위(X1–X2, Y1–Y2) 안에서만 탐색</label>
+      </div>
+      <div class="row" style="margin-top:8px"><button class="b p" id="autoBtn">현재 시리즈에 추출</button><span class="msg" id="autoMsg"></span></div>
+    </section>
+    <section>
+      <h2>Data <span class="sp"></span><label class="ck" style="text-transform:none;letter-spacing:0;font-weight:400;color:var(--ink)"><input type="checkbox" id="sortx" checked> X 정렬</label></h2>
+      <div class="tbl"><table><thead><tr><th>#</th><th>X</th><th>Y</th></tr></thead><tbody id="tb"></tbody></table></div>
+    </section>
+    <section>
+      <h2>Export</h2>
+      <div class="ag" style="margin-bottom:6px">
+        <label>범위<select id="scope"><option value="act">현재 시리즈</option><option value="long">전체 (long: series,x,y)</option><option value="wide">전체 (wide: x1,y1,x2,y2…)</option></select></label>
+        <label>구분자<select id="delim"><option value="tab">Tab (Excel 붙여넣기)</option><option value="comma">Comma (CSV)</option></select></label>
+      </div>
+      <textarea id="out" readonly></textarea>
+      <div class="row" style="margin-top:6px"><button class="b p" id="copyBtn">클립보드 복사</button><button class="b" id="saveBtn">CSV 저장</button><span class="st" id="copyMsg"></span></div>
+    </section>
+    <section class="help">
+      <b style="color:var(--ink)">조작</b><br>
+      클릭: 점 추가 · 드래그: 점/보정점 이동 · 우클릭: 삭제<br>
+      휠: 확대/축소 · <kbd>Space</kbd>+드래그 또는 휠 버튼 드래그: 화면 이동<br>
+      <kbd>C</kbd> 보정 · <kbd>A</kbd> 추가 · <kbd>P</kbd> 색상 · <kbd>F</kbd> 맞춤 · <kbd>Backspace</kbd> 마지막 점 삭제 · <kbd>Ctrl+Z</kbd> 되돌리기
+    </section>
+  </aside>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const cv=$('cv'),ctx=cv.getContext('2d'),lp=$('loupe'),lctx=lp.getContext('2d');
+const COLORS=['#e11d48','#2563eb','#16a34a','#d97706','#7c3aed','#0891b2','#db2777','#4b5563'];
+const LAB=['X1','X2','Y1','Y2'];
+let img=null,pix=null,W=0,H=0,view={s:1,ox:0,oy:0},mode='calib';
+let calib={p:[null,null,null,null]},datasets=[],act=0,hist=[],pickColor=null;
+let drag=null,spaceDown=false,mouse=null,hover=null;
+
+function newDS(){const i=datasets.length;datasets.push({name:'Series '+(i+1),color:COLORS[i%COLORS.length],pts:[]});act=i;}
+newDS();
+
+/* ---------- calibration ---------- */
+const calVals={x1:0,x2:1,y1:0,y2:1};
+function buildCalGrid(){
+  const g=$('calGrid');g.innerHTML='';
+  LAB.forEach((l,i)=>{
+    const k=l.toLowerCase();
+    g.insertAdjacentHTML('beforeend',`<span class="lb" style="color:${i<2?'#0f766e':'#9333ea'}">${l}</span>
+      <input type="text" id="v_${k}" value="${calVals[k]}" placeholder="${l} 축 값">
+      <span class="st" id="s_${k}"></span>
+      <button class="x" title="다시 지정" data-re="${i}">↺</button>`);
+  });
+  g.querySelectorAll('input').forEach(inp=>inp.addEventListener('input',refresh));
+  g.querySelectorAll('[data-re]').forEach(b=>b.onclick=()=>{snapshot();calib.p[+b.dataset.re]=null;setMode('calib');});
+}
+buildCalGrid();
+function num(id){const s=$(id).value.trim();return s===''?NaN:Number(s);}
+function cal(){
+  const lx=$('logx').checked,ly=$('logy').checked;
+  const x1=num('v_x1'),x2=num('v_x2'),y1=num('v_y1'),y2=num('v_y2');
+  if(calib.p.some(p=>!p))return null;
+  if([x1,x2,y1,y2].some(v=>!isFinite(v))||x1===x2||y1===y2)return null;
+  if(lx&&(x1<=0||x2<=0))return null;
+  if(ly&&(y1<=0||y2<=0))return null;
+  const [X1,X2,Y1,Y2]=calib.p;
+  if(Math.hypot(X2[0]-X1[0],X2[1]-X1[1])<1||Math.hypot(Y2[0]-Y1[0],Y2[1]-Y1[1])<1)return null;
+  return {lx,ly,X1,X2,Y1,Y2,a:lx?Math.log10(x1):x1,b:lx?Math.log10(x2):x2,c:ly?Math.log10(y1):y1,d:ly?Math.log10(y2):y2};
+}
+function proj(P,A,B){const dx=B[0]-A[0],dy=B[1]-A[1];return((P[0]-A[0])*dx+(P[1]-A[1])*dy)/(dx*dx+dy*dy);}
+function toData(px,py,C){
+  if(!C)return null;
+  let x=C.a+proj([px,py],C.X1,C.X2)*(C.b-C.a);
+  let y=C.c+proj([px,py],C.Y1,C.Y2)*(C.d-C.c);
+  return [C.lx?10**x:x,C.ly?10**y:y];
+}
+function calMessage(){
+  if(calib.p.some(p=>!p))return '';
+  const lx=$('logx').checked,ly=$('logy').checked,v=['v_x1','v_x2','v_y1','v_y2'].map(num);
+  if(v.some(x=>!isFinite(x)))return '축 값 4개를 숫자로 입력하세요 (예: 1e-12).';
+  if(v[0]===v[1]||v[2]===v[3])return 'X1≠X2, Y1≠Y2 이어야 합니다.';
+  if((lx&&(v[0]<=0||v[1]<=0))||(ly&&(v[2]<=0||v[3]<=0)))return 'Log scale 축의 값은 양수여야 합니다.';
+  return '';
+}
+
+/* ---------- view ---------- */
+const i2s=(x,y)=>[x*view.s+view.ox,y*view.s+view.oy];
+const s2i=(x,y)=>[(x-view.ox)/view.s,(y-view.oy)/view.s];
+function size(){const r=cv.getBoundingClientRect(),d=devicePixelRatio||1;cv.width=Math.round(r.width*d);cv.height=Math.round(r.height*d);
+  const lr=lp.getBoundingClientRect();lp.width=Math.round(lr.width*d);lp.height=Math.round(lr.height*d);draw();drawLoupe();}
+function fit(){if(!img)return;const r=cv.getBoundingClientRect();const s=Math.min(r.width/W,r.height/H)*0.94;
+  view={s,ox:(r.width-W*s)/2,oy:(r.height-H*s)/2};draw();}
+window.addEventListener('resize',size);
+
+function draw(){
+  const d=devicePixelRatio||1,r=cv.getBoundingClientRect();
+  ctx.setTransform(d,0,0,d,0,0);ctx.clearRect(0,0,r.width,r.height);
+  if(!img)return;
+  ctx.imageSmoothingEnabled=view.s<2.5;
+  ctx.drawImage(img,view.ox,view.oy,W*view.s,H*view.s);
+  // axis guide lines
+  ctx.setLineDash([5,4]);ctx.lineWidth=1;
+  [[0,1,'#0f766e'],[2,3,'#9333ea']].forEach(([i,j,c])=>{const A=calib.p[i],B=calib.p[j];if(!A||!B)return;
+    const a=i2s(...A),b=i2s(...B);ctx.strokeStyle=c;ctx.beginPath();ctx.moveTo(...a);ctx.lineTo(...b);ctx.stroke();});
+  ctx.setLineDash([]);
+  // datasets (inactive first)
+  const order=datasets.map((_,k)=>k).filter(k=>k!==act).concat([act]);
+  order.forEach(k=>{const ds=datasets[k],on=k===act;
+    ctx.globalAlpha=on?1:.55;ctx.fillStyle=ds.color;ctx.strokeStyle='#fff';ctx.lineWidth=1.3;
+    ds.pts.forEach((p,i)=>{const [sx,sy]=i2s(p[0],p[1]);ctx.beginPath();ctx.arc(sx,sy,on?4.5:3.5,0,7);ctx.fill();ctx.stroke();
+      if(on&&hover&&hover.t==='pt'&&hover.i===i){ctx.strokeStyle=ds.color;ctx.lineWidth=2;ctx.beginPath();ctx.arc(sx,sy,8,0,7);ctx.stroke();ctx.strokeStyle='#fff';ctx.lineWidth=1.3;}
+    });});
+  ctx.globalAlpha=1;
+  // calibration markers
+  calib.p.forEach((p,i)=>{if(!p)return;const [sx,sy]=i2s(...p),c=i<2?'#0f766e':'#9333ea';
+    ctx.strokeStyle=c;ctx.lineWidth=(hover&&hover.t==='cal'&&hover.i===i)?2.5:1.6;
+    ctx.beginPath();ctx.moveTo(sx-11,sy);ctx.lineTo(sx+11,sy);ctx.moveTo(sx,sy-11);ctx.lineTo(sx,sy+11);ctx.stroke();
+    ctx.beginPath();ctx.arc(sx,sy,6,0,7);ctx.stroke();
+    ctx.font='600 11px system-ui,sans-serif';const tw=ctx.measureText(LAB[i]).width;
+    ctx.fillStyle=c;ctx.fillRect(sx+8,sy-22,tw+8,15);ctx.fillStyle='#fff';ctx.fillText(LAB[i],sx+12,sy-11);});
+}
+function drawLoupe(){
+  const d=devicePixelRatio||1,w=lp.width/d,h=lp.height/d;
+  lctx.setTransform(d,0,0,d,0,0);lctx.fillStyle='#fafafa';lctx.fillRect(0,0,w,h);
+  if(!img||!mouse)return;
+  const Z=7,[ix,iy]=s2i(mouse[0],mouse[1]),sw=w/Z,sh=h/Z;
+  lctx.imageSmoothingEnabled=false;
+  lctx.drawImage(img,ix-sw/2,iy-sh/2,sw,sh,0,0,w,h);
+  const tr=(x,y)=>[(x-ix)*Z+w/2,(y-iy)*Z+h/2];
+  datasets.forEach((ds,k)=>{lctx.fillStyle=ds.color;lctx.globalAlpha=k===act?.9:.5;ds.pts.forEach(p=>{const [a,b]=tr(p[0],p[1]);if(a<-10||a>w+10||b<-10||b>h+10)return;lctx.beginPath();lctx.arc(a,b,4,0,7);lctx.fill();});});
+  lctx.globalAlpha=1;
+  calib.p.forEach((p,i)=>{if(!p)return;const [a,b]=tr(...p);lctx.strokeStyle=i<2?'#0f766e':'#9333ea';lctx.lineWidth=1.5;lctx.beginPath();lctx.arc(a,b,6,0,7);lctx.stroke();});
+  lctx.strokeStyle='rgba(220,38,38,.9)';lctx.lineWidth=1;lctx.beginPath();
+  lctx.moveTo(w/2,0);lctx.lineTo(w/2,h/2-6);lctx.moveTo(w/2,h/2+6);lctx.lineTo(w/2,h);
+  lctx.moveTo(0,h/2);lctx.lineTo(w/2-6,h/2);lctx.moveTo(w/2+6,h/2);lctx.lineTo(w,h/2);lctx.stroke();
+}
+
+/* ---------- history ---------- */
+function snapshot(){hist.push(JSON.stringify({calib,datasets,act}));if(hist.length>200)hist.shift();}
+function undo(){if(!hist.length)return;const s=JSON.parse(hist.pop());calib=s.calib;datasets=s.datasets;act=Math.min(s.act,datasets.length-1);refresh();}
+
+/* ---------- modes ---------- */
+function setMode(m){mode=m;document.querySelectorAll('#modes button').forEach(b=>b.classList.toggle('on',b.dataset.m===m));refresh();}
+document.querySelectorAll('#modes button').forEach(b=>b.onclick=()=>setMode(b.dataset.m));
+function hintText(){
+  if(!img)return '';
+  if(mode==='calib'){const n=calib.p.findIndex(p=>!p);
+    if(n>=0)return `${LAB[n]} 위치를 클릭 — ${n<2?'X축 위 값을 아는 두 지점 (X1, X2)':'Y축 위 값을 아는 두 지점 (Y1, Y2)'}. 정확도를 위해 확대(휠) 후 tick 교차점을 찍으세요.`;
+    return '보정점은 드래그로 미세 조정 가능. 오른쪽에 축 값을 입력한 뒤 ② 점 추가 모드로 전환하세요.';}
+  if(mode==='pick')return '추출할 곡선의 색을 클릭하세요.';
+  return cal()?'클릭: 점 추가 · 드래그: 이동 · 우클릭: 삭제 · Space+드래그: 화면 이동':'점은 찍을 수 있지만, 좌표 변환을 위해 축 보정을 완료하세요.';
+}
+
+/* ---------- mouse ---------- */
+function mpos(e){const r=cv.getBoundingClientRect();return [e.clientX-r.left,e.clientY-r.top];}
+function hitTest(mx,my){
+  if(mode==='calib'){let best=null,bd=12;calib.p.forEach((p,i)=>{if(!p)return;const [sx,sy]=i2s(...p),d=Math.hypot(sx-mx,sy-my);if(d<bd){bd=d;best={t:'cal',i};}});return best;}
+  if(mode==='add'){let best=null,bd=9;datasets[act].pts.forEach((p,i)=>{const [sx,sy]=i2s(p[0],p[1]),d=Math.hypot(sx-mx,sy-my);if(d<bd){bd=d;best={t:'pt',i};}});return best;}
+  return null;
+}
+cv.addEventListener('mousedown',e=>{
+  if(!img)return;const [mx,my]=mpos(e),[ix,iy]=s2i(mx,my);
+  if(e.button===1||(e.button===0&&spaceDown)){drag={t:'pan',sx:mx,sy:my,ox:view.ox,oy:view.oy};cv.style.cursor='grabbing';e.preventDefault();return;}
+  if(e.button!==0)return;
+  const h=hitTest(mx,my);
+  if(h){snapshot();drag={t:h.t,i:h.i,dx:0,dy:0};return;}
+  if(mode==='calib'){const n=calib.p.findIndex(p=>!p);if(n<0)return;snapshot();calib.p[n]=[ix,iy];
+    if(calib.p.every(p=>p)){setMode('add');const f=$('v_x1');f.focus();f.select();}else refresh();return;}
+  if(mode==='pick'){pickAt(ix,iy);return;}
+  if(mode==='add'){snapshot();datasets[act].pts.push([ix,iy]);hover={t:'pt',i:datasets[act].pts.length-1};drag={t:'pt',i:hover.i};refresh();}
+});
+window.addEventListener('mousemove',e=>{
+  if(!img)return;const [mx,my]=mpos(e),r=cv.getBoundingClientRect();
+  const inside=mx>=0&&my>=0&&mx<=r.width&&my<=r.height;
+  if(drag&&drag.t==='pan'){view.ox=drag.ox+mx-drag.sx;view.oy=drag.oy+my-drag.sy;draw();return;}
+  if(!inside&&!drag)return;
+  mouse=[mx,my];const [ix,iy]=s2i(mx,my);
+  if(drag&&drag.t==='cal'){calib.p[drag.i]=[ix,iy];}
+  else if(drag&&drag.t==='pt'){datasets[act].pts[drag.i]=[ix,iy];}
+  else hover=hitTest(mx,my);
+  if(!spaceDown)cv.style.cursor=hover?'move':(mode==='pick'?'copy':'crosshair');
+  const C=cal(),dd=toData(ix,iy,C);
+  const ro=$('readout');ro.hidden=false;
+  ro.textContent=`px (${ix.toFixed(1)}, ${iy.toFixed(1)})`+(dd?`\nX = ${fmt(dd[0])}\nY = ${fmt(dd[1])}`:'');
+  draw();drawLoupe();
+  if(drag&&drag.t!=='pan')renderTable();
+});
+window.addEventListener('mouseup',()=>{if(drag){const was=drag.t;drag=null;cv.style.cursor=spaceDown?'grab':'crosshair';if(was!=='pan')refresh();}});
+cv.addEventListener('contextmenu',e=>{e.preventDefault();if(!img)return;const [mx,my]=mpos(e);
+  let best=-1,bd=12;datasets[act].pts.forEach((p,i)=>{const [sx,sy]=i2s(p[0],p[1]),d=Math.hypot(sx-mx,sy-my);if(d<bd){bd=d;best=i;}});
+  if(best>=0){snapshot();datasets[act].pts.splice(best,1);hover=null;refresh();}});
+cv.addEventListener('wheel',e=>{if(!img)return;e.preventDefault();const [mx,my]=mpos(e);
+  const f=Math.exp(-e.deltaY*(e.deltaMode?0.05:0.0015)),ns=Math.min(60,Math.max(0.05,view.s*f)),k=ns/view.s;
+  view.ox=mx-(mx-view.ox)*k;view.oy=my-(my-view.oy)*k;view.s=ns;draw();drawLoupe();},{passive:false});
+cv.addEventListener('mouseleave',()=>{if(!drag){$('readout').hidden=true;}});
+
+/* ---------- keyboard ---------- */
+const typing=e=>/INPUT|TEXTAREA|SELECT/.test(e.target.tagName);
+window.addEventListener('keydown',e=>{
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'&&!typing(e)){e.preventDefault();undo();return;}
+  if(typing(e))return;
+  if(e.code==='Space'){spaceDown=true;cv.style.cursor='grab';e.preventDefault();return;}
+  const k=e.key.toLowerCase();
+  if(k==='c')setMode('calib');else if(k==='a')setMode('add');else if(k==='p')setMode('pick');else if(k==='f')fit();
+  else if(e.key==='Backspace'||e.key==='Delete'){const p=datasets[act].pts;if(p.length){snapshot();p.pop();refresh();}e.preventDefault();}
+});
+window.addEventListener('keyup',e=>{if(e.code==='Space'){spaceDown=false;cv.style.cursor='crosshair';}});
+
+/* ---------- image loading ---------- */
+function setImage(im,keep){
+  img=im;W=im.naturalWidth||im.width;H=im.naturalHeight||im.height;
+  const oc=document.createElement('canvas');oc.width=W;oc.height=H;const o=oc.getContext('2d');o.drawImage(im,0,0);pix=o.getImageData(0,0,W,H);
+  if(!keep){calib.p=[null,null,null,null];datasets.forEach(d=>d.pts=[]);hist=[];pickColor=null;}
+  $('drop').style.display='none';$('hint').hidden=false;size();fit();
+}
+function loadFile(f){if(!f||!f.type||!f.type.startsWith('image/'))return;const u=URL.createObjectURL(f),im=new Image();
+  im.onload=()=>{setImage(im);setMode('calib');};im.src=u;}
+$('openBtn').onclick=()=>$('file').click();
+$('file').onchange=e=>{loadFile(e.target.files[0]);e.target.value='';};
+const stage=$('stage');
+stage.addEventListener('dragover',e=>{e.preventDefault();$('drop').classList.add('over');});
+stage.addEventListener('dragleave',()=>$('drop').classList.remove('over'));
+stage.addEventListener('drop',e=>{e.preventDefault();$('drop').classList.remove('over');loadFile(e.dataTransfer.files[0]);});
+document.addEventListener('paste',e=>{for(const it of (e.clipboardData||{}).items||[]){if(it.type.startsWith('image/')){loadFile(it.getAsFile());e.preventDefault();return;}}});
+
+/* ---------- demo ---------- */
+$('demoBtn').onclick=()=>{
+  const c=document.createElement('canvas');c.width=640;c.height=440;const g=c.getContext('2d');
+  const L=90,T=24,PW=520,PH=350;g.fillStyle='#fff';g.fillRect(0,0,640,440);
+  const px=v=>L+v/1.5*PW,py=y=>T+PH-(Math.log10(y)+12)/9*PH;
+  g.strokeStyle='#e5e7eb';g.lineWidth=1;
+  for(let d=-12;d<=-3;d++){g.beginPath();g.moveTo(L,py(10**d)+.5);g.lineTo(L+PW,py(10**d)+.5);g.stroke();}
+  for(let v=0;v<=1.5001;v+=.25){g.beginPath();g.moveTo(px(v)+.5,T);g.lineTo(px(v)+.5,T+PH);g.stroke();}
+  g.strokeStyle='#111';g.lineWidth=1.5;g.strokeRect(L,T,PW,PH);
+  g.fillStyle='#111';g.font='13px Arial';g.textAlign='center';
+  for(let v=0;v<=1.5001;v+=.25){g.fillText(v.toFixed(2),px(v),T+PH+18);g.beginPath();g.moveTo(px(v),T+PH);g.lineTo(px(v),T+PH-6);g.stroke();}
+  g.textAlign='right';for(let d=-12;d<=-3;d++){g.fillText('1E'+d,L-8,py(10**d)+4);g.beginPath();g.moveTo(L,py(10**d));g.lineTo(L+6,py(10**d));g.stroke();}
+  g.textAlign='center';g.font='bold 14px Arial';g.fillText('Vgs (V)',L+PW/2,T+PH+42);
+  g.save();g.translate(22,T+PH/2);g.rotate(-Math.PI/2);g.fillText('Id (A)',0,0);g.restore();
+  const Id=(V,vt,k)=>{const f=Math.log(1+Math.exp((V-vt)/0.07));return 3e-12+k*f*f;};
+  [['#dc2626',.45,3e-6],['#2563eb',.62,1.5e-6]].forEach(([col,vt,k])=>{g.strokeStyle=col;g.lineWidth=2.5;g.beginPath();
+    for(let i=0;i<=300;i++){const V=1.5*i/300,x=px(V),y=py(Id(V,vt,k));i?g.lineTo(x,y):g.moveTo(x,y);}g.stroke();});
+  const im=new Image();im.onload=()=>{
+    setImage(im);datasets=[];newDS();datasets[0].name='Device A';newDS();datasets[1].name='Device B';act=0;
+    calib.p=[[px(0),T+PH],[px(1.5),T+PH],[L,py(1e-12)],[L,py(1e-3)]];
+    $('v_x1').value=0;$('v_x2').value=1.5;$('v_y1').value='1e-12';$('v_y2').value='1e-3';$('logx').checked=false;$('logy').checked=true;
+    setMode('pick');};
+  im.src=c.toDataURL();
+};
+
+/* ---------- color pick & auto extract ---------- */
+function pickAt(ix,iy){const x=Math.floor(ix),y=Math.floor(iy);if(x<0||y<0||x>=W||y>=H)return;
+  const o=(y*W+x)*4,d=pix.data;pickColor=[d[o],d[o+1],d[o+2]];
+  const hex='#'+pickColor.map(v=>v.toString(16).padStart(2,'0')).join('');
+  datasets[act].color=hex;setMode('add');}
+function autoExtract(){
+  const C=cal(),m=$('autoMsg');m.textContent='';
+  if(!pix){m.textContent='이미지를 먼저 여세요.';return;}
+  if(!pickColor){m.textContent='먼저 곡선 색을 선택하세요.';return;}
+  const tol=Math.max(1,+$('tol').value||60),step=Math.max(1,Math.round(+$('stepPx').value||5)),tol2=tol*tol;
+  let x0=0,x1=W-1,y0=0,y1=H-1;
+  if($('clip').checked){if(!C){m.textContent='보정을 먼저 완료하세요 (또는 범위 제한 해제).';return;}
+    const xs=[C.X1[0],C.X2[0]],ys=[C.Y1[1],C.Y2[1]];
+    x0=Math.max(0,Math.ceil(Math.min(...xs)));x1=Math.min(W-1,Math.floor(Math.max(...xs)));
+    y0=Math.max(0,Math.ceil(Math.min(...ys)));y1=Math.min(H-1,Math.floor(Math.max(...ys)));}
+  const d=pix.data,[R,G,B]=pickColor;
+  const match=(x,y)=>{const o=(y*W+x)*4;if(d[o+3]<20)return false;const a=d[o]-R,b=d[o+1]-G,c=d[o+2]-B;return a*a+b*b+c*c<=tol2;};
+  const out=[];let prevY=null;
+  for(let x=x0;x<=x1;x+=step){
+    const runs=[];let s=-1;
+    for(let y=y0;y<=y1;y++){const mm=match(x,y);if(mm&&s<0)s=y;if(!mm&&s>=0){runs.push([s,y-1]);s=-1;}}
+    if(s>=0)runs.push([s,y1]);
+    if(!runs.length)continue;
+    let r;
+    if(prevY===null)r=runs.reduce((a,b)=>(b[1]-b[0])>(a[1]-a[0])?b:a);
+    else r=runs.reduce((a,b)=>Math.abs((b[0]+b[1])/2-prevY)<Math.abs((a[0]+a[1])/2-prevY)?b:a);
+    const yc=(r[0]+r[1])/2+.5;prevY=yc-.5;out.push([x+.5,yc]);
+  }
+  if(!out.length){m.textContent='일치하는 픽셀이 없습니다 — Tolerance를 늘려보세요.';return;}
+  snapshot();datasets[act].pts=out;m.textContent=out.length+'개 점 추출';refresh();
+}
+$('autoBtn').onclick=autoExtract;
+
+/* ---------- datasets UI ---------- */
+$('addDs').onclick=()=>{snapshot();newDS();refresh();};
+function renderDs(){
+  const L=$('dsList');L.innerHTML='';
+  datasets.forEach((ds,k)=>{
+    const row=document.createElement('div');row.className='ds'+(k===act?' on':'');
+    row.innerHTML=`<input type="radio" name="dsr" ${k===act?'checked':''}><input type="color" value="${ds.color}"><input type="text" value="${ds.name.replace(/"/g,'&quot;')}"><span class="n">${ds.pts.length} pts</span><button class="x" title="시리즈 삭제">×</button>`;
+    const [rad,col,nm,,del]=row.children;
+    row.onclick=e=>{if(e.target===col||e.target===nm||e.target===del)return;act=k;refresh();};
+    rad.onchange=()=>{act=k;refresh();};
+    col.oninput=()=>{ds.color=col.value;draw();};
+    nm.onfocus=()=>{if(act!==k){act=k;draw();renderTable();renderOut();document.querySelectorAll('.ds').forEach((r,i)=>r.classList.toggle('on',i===k));}};
+    nm.oninput=()=>{ds.name=nm.value;renderOut();};
+    del.onclick=()=>{if(datasets.length===1){if(ds.pts.length){snapshot();ds.pts=[];refresh();}return;}
+      snapshot();datasets.splice(k,1);act=Math.max(0,Math.min(act,datasets.length-1));refresh();};
+    L.appendChild(row);
+  });
+}
+
+/* ---------- table & export ---------- */
+function fmt(v){if(!isFinite(v))return '';const a=Math.abs(v);return(a!==0&&(a<1e-3||a>=1e5))?v.toExponential(5):String(+v.toPrecision(6));}
+function rowsOf(ds,C){if(!C)return[];const r=ds.pts.map(p=>toData(p[0],p[1],C));if($('sortx').checked)r.sort((a,b)=>a[0]-b[0]);return r;}
+function renderTable(){
+  const C=cal(),tb=$('tb'),ds=datasets[act];
+  if(!C){tb.innerHTML=`<tr><td colspan="3" style="text-align:center;padding:10px">축 보정 완료 후 표시됩니다 (${ds.pts.length} pts)</td></tr>`;return;}
+  tb.innerHTML=rowsOf(ds,C).map((r,i)=>`<tr><td>${i+1}</td><td>${fmt(r[0])}</td><td>${fmt(r[1])}</td></tr>`).join('')||'<tr><td colspan="3" style="text-align:center;padding:10px">점이 없습니다</td></tr>';
+}
+function renderOut(){
+  const C=cal(),o=$('out');if(!C){o.value='';return;}
+  const D=$('delim').value==='tab'?'\t':',',sc=$('scope').value,q=s=>D===','&&/[",]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;
+  let lines=[];
+  if(sc==='act'){const ds=datasets[act];lines.push(['x','y'].join(D));rowsOf(ds,C).forEach(r=>lines.push(fmt(r[0])+D+fmt(r[1])));}
+  else if(sc==='long'){lines.push(['series','x','y'].join(D));datasets.forEach(ds=>rowsOf(ds,C).forEach(r=>lines.push([q(ds.name),fmt(r[0]),fmt(r[1])].join(D))));}
+  else{const all=datasets.map(ds=>rowsOf(ds,C)),n=Math.max(0,...all.map(a=>a.length));
+    lines.push(datasets.map(ds=>[q(ds.name+' x'),q(ds.name+' y')].join(D)).join(D));
+    for(let i=0;i<n;i++)lines.push(all.map(a=>a[i]?fmt(a[i][0])+D+fmt(a[i][1]):D).join(D));}
+  o.value=lines.join('\n');
+}
+['scope','delim','sortx'].forEach(id=>$(id).addEventListener('change',()=>{renderTable();renderOut();}));
+['logx','logy'].forEach(id=>$(id).addEventListener('change',refresh));
+$('copyBtn').onclick=async()=>{const t=$('out').value,m=$('copyMsg');if(!t){m.textContent='복사할 데이터가 없습니다';return;}
+  try{await navigator.clipboard.writeText(t);m.textContent='복사됨 ✓';}
+  catch(_){const o=$('out');o.focus();o.select();try{document.execCommand('copy');m.textContent='복사됨 ✓';}catch(__){m.textContent='텍스트를 선택했습니다 — Ctrl+C';}}
+  setTimeout(()=>m.textContent='',2000);};
+
+$('saveBtn').onclick=()=>{const t=$('out').value,m=$('copyMsg');if(!t){m.textContent='저장할 데이터가 없습니다';return;}
+  const tab=$('delim').value==='tab',b=new Blob(['\ufeff'+t],{type:'text/plain;charset=utf-8'}),a=document.createElement('a');
+  a.href=URL.createObjectURL(b);a.download='digitized'+(tab?'.txt':'.csv');document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);};
+/* ---------- refresh ---------- */
+function refresh(){
+  const next=calib.p.findIndex(p=>!p);
+  LAB.forEach((l,i)=>{const s=$('s_'+l.toLowerCase());
+    if(calib.p[i]){s.textContent='설정됨';s.className='st ok';}
+    else if(mode==='calib'&&i===next&&img){s.textContent='클릭 대기';s.className='st wait';}
+    else{s.textContent='미설정';s.className='st';}});
+  $('calMsg').textContent=calMessage();
+  if(pickColor){$('pickSw').style.background=`rgb(${pickColor})`;$('pickTxt').textContent=`RGB(${pickColor.join(', ')})`;}
+  else{$('pickSw').style.background='';$('pickTxt').textContent='색상 미선택 — ③ Color pick 모드에서 곡선 클릭';}
+  const h=$('hint');h.textContent=hintText();h.hidden=!img;
+  renderDs();renderTable();renderOut();draw();drawLoupe();
+}
+$('undoBtn').onclick=undo;$('fitBtn').onclick=fit;
+setMode('calib');size();
+</script>
+</body>
+</html>
