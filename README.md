@@ -42,7 +42,7 @@ Tkinter (Python 기본 포함) + Pillow만 사용합니다.
 
 - Windows: `desktop\build_windows.bat` 실행 → `desktop\dist\PlotDigitizer.exe`
 - macOS / Linux: `bash desktop/build.sh`
-- 자동 빌드: `v*` 태그를 push하면 GitHub Actions가 3개 OS용 실행 파일을 빌드해 Release에 첨부합니다.
+- 자동 빌드: GitHub에서 Release를 발행(또는 `v*` 태그 push)하면 Actions가 3개 OS용 실행 파일을 빌드해 해당 Release에 첨부합니다.
 
 ## Repository layout
 
